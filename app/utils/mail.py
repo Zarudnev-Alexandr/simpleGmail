@@ -52,7 +52,20 @@ def decode_email_subject(encoded_subject):
 
 
 def convert_date(date_string: str):
-    date_object = datetime.strptime(date_string, "%a, %d %b %Y %H:%M:%S %z")
+    # Extract the time zone information in parentheses, if present
+    match = re.search(r'\((\w+)\)$', date_string)
+    time_zone = match.group(1) if match else None
+
+    # Remove the time zone information from the date string
+    date_string_without_timezone = re.sub(r'\s*\(\w+\)$', '', date_string)
+
+    # Convert GMT to UTC for compatibility with %z format
+    date_string_without_timezone = re.sub(r'GMT$', '+0000', date_string_without_timezone)
+
+    # Parse the date string without the time zone
+    date_object = datetime.strptime(date_string_without_timezone, "%a, %d %b %Y %H:%M:%S %z")
+
+    # Format the parsed date with the time zone information
     formatted_date = "{}, {} {} {} {:02}:{:02}:{:02}".format(
         days_of_week[date_object.strftime("%a")],
         date_object.day,
@@ -62,6 +75,11 @@ def convert_date(date_string: str):
         date_object.minute,
         date_object.second
     )
+
+    # Add the time zone information if available
+    if time_zone:
+        formatted_date += f" {time_zone}"
+
     return formatted_date
 
 

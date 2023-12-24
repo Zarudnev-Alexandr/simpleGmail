@@ -2,12 +2,12 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardRemove
 
-from keyboards.for_questions import get_yes_no_kb
+from app.keyboards.for_questions import get_yes_no_kb
 
 router = Router()  # [1]
 
 
-@router.message(Command("start"))  # [2]
+@router.message(Command("start"))
 async def cmd_start(message: Message):
     await message.answer("Вы довольны своей работой?", reply_markup=get_yes_no_kb())
 

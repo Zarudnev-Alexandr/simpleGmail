@@ -5,19 +5,43 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from email_validator import validate_email, EmailNotValidError
 
+from app.db.utils import add_connected_email, get_my_connected_mail
+from app.keyboards.mail import mail_go_kb
 
 router = Router()
 users_data = {}
+
 
 class RegistrationStates(StatesGroup):
     waiting_for_email = State()
     waiting_for_password = State()
 
 
-@router.message(StateFilter(None), Command('mail'))
+@router.message(F.text.lower() == "📬моя почта")
+async def mail_my_mail(message: Message):
+    user_id = message.from_user.id
+    my_mail_result = await get_my_connected_mail(user_id=user_id)
+
+    if not my_mail_result:
+        await message.answer(text="Почта не подключена❌\nПерейдите в меню снизу и выберите <i>Подключить почту</i>↘")
+        await message.delete()
+    else:
+        my_mail = my_mail_result[0]  # Extract the ConnectedMail object from the tuple
+        email_address = my_mail.mail
+        await message.answer(text=f"Ваша почта подключена✅\nEmail: {email_address}")
+        await message.delete()
+
+
+@router.message(StateFilter(None), F.text.lower() == "💌подключить почту")
 async def mail_start(message: Message, state: FSMContext):
-    await message.answer("Укажите почту:")
-    await state.set_state(RegistrationStates.waiting_for_email)
+    user_id = message.from_user.id
+    if not await get_my_connected_mail(user_id=user_id):
+        await message.answer("Укажите почту:")
+        await message.delete()
+        await state.set_state(RegistrationStates.waiting_for_email)
+    else:
+        await message.answer("Почта уже подключена")
+        await message.delete()
 
 
 @router.message(RegistrationStates.waiting_for_email, F.text)
@@ -64,10 +88,13 @@ async def callbacks_mail(callback: CallbackQuery, state: FSMContext):
     user_data = await state.get_data()
 
     if action == "confirm":
-        users_data[user_id] = {
-            'email': user_data['email'],
-            'password': user_data['password']
-        }
+        # users_data[user_id] = {
+        #     'email': user_data['email'],
+        #     'password': user_data['password']
+        # }
+        answer_message = await add_connected_email(mail=user_data['email'], password=user_data['password'],
+                                                user_id=user_id)
+        await callback.message.answer(answer_message)
 
         await callback.message.edit_text("Ваши данные сохранены!")
         await state.clear()
