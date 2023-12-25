@@ -29,6 +29,7 @@ def start_reply_keyboard_markup():
             KeyboardButton(text="📬Моя почта"),
             KeyboardButton(text="✅Белый список"),
             KeyboardButton(text="📃Инструкция"),
+            KeyboardButton(text="🚀Запустить "),
         ]
     ]
     keyboard = ReplyKeyboardMarkup(

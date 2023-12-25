@@ -16,7 +16,7 @@ def get_start_text() -> str:
             "✉В реальном времени отправлять сообщения, приходящие вам на google почту\n\n"
             "⚙Настраивать белый список, чтобы смотреть сообщения только от нужных людей\n\n"
             "🤡Веселить вас ломаной HTMl разметкой, вель телеграм - он такой\n\n"
-            "<b>Что ж, давайте начнем! Все пункты меню снизу в клавиатуре.</b>")
+            "<b>Что ж, давайте начнем! Все пункты меню снизу в клавиатуре↘</b>")
 
 
 @router.message(Command('start'))
@@ -28,17 +28,15 @@ async def start(message: Message):
     await message.answer(get_start_text(), reply_markup=start_reply_keyboard_markup())
 
 
-@router.callback_query(F.data.startswith("start_back_to_main"))
-async def callbacks_start_main(callback: CallbackQuery):
-    await callback.message.edit_text(get_start_text(), reply_markup=start_kb())
+# @router.callback_query(F.data.startswith("start_back_to_main"))
+# async def callbacks_start_main(callback: CallbackQuery):
+#     await callback.message.edit_text(get_start_text(), reply_markup=start_kb())
 
 
-@router.callback_query(F.data.startswith("start_"))
-async def callbacks_start(callback: CallbackQuery):
-    action = callback.data.split("_")[1]
-
-    if action == "instruction":
-        await callback.message.edit_text(text="📃<b>Инструкция</b>📃\n\n"
+@router.message(F.text.lower() == "📃инструкция")
+async def get_instruction(message: Message):
+    await message.delete()
+    await message.answer(text="📃<b>Инструкция</b>📃\n\n"
                                            "Для того чтобы просмотривать сообщения, отправленные на почту, "
                                               "в телеграме, "
                                               "нужно провести небольшую "
@@ -63,8 +61,7 @@ async def callbacks_start(callback: CallbackQuery):
                                            "8) В открывшейся окне выбираем вкладку '<i>Пересылка и POP/IMAP</i>' (она "
                                            "находится сверху)\n"
                                            "9) Нажимаем на '<i>Включить IMAP</i>'. Сохраняем изменения\n"
-                                           "10) Вот и все! Удачного использования бота.",
-                                      reply_markup=start_instruction_kb())
+                                           "10) Вот и все! Удачного использования бота.",)
 
 
 

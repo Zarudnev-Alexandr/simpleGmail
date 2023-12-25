@@ -1,5 +1,6 @@
 import base64
 import email
+import imaplib
 from datetime import datetime
 import re
 from email.header import decode_header
@@ -47,7 +48,6 @@ def decode_email_subject(encoded_subject):
 
     except (base64.binascii.Error, UnicodeDecodeError) as e:
         # Handle decoding errors
-        print("An error occurred:", e)
         return None
 
 
@@ -140,3 +140,32 @@ def decode_email_body(email_message):
     return text_body
 
 
+def check_format_password(input_string):
+    # Паттерн для проверки формата
+    pattern = re.compile(r'^[a-z]+\s[a-z]+\s[a-z]+\s[a-z]+$')
+
+    # Проверка соответствия строки паттерну
+    if re.match(pattern, input_string):
+        return True
+    else:
+        return False
+
+
+# Функция для подключения к почте
+def connect_to_mail_class(my_mail):
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(my_mail.mail, my_mail.hashed_password)
+    return mail
+
+
+def connect_to_mail_dict(credentials):
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(credentials['mail'], credentials['hashed_password'])
+        return mail
+    except imaplib.IMAP4.error as e:
+        error_message = str(e)
+        if "Invalid credentials" in error_message:
+            return "LoginFatal"
+        else:
+            return f"Error connecting to mail: {error_message}"

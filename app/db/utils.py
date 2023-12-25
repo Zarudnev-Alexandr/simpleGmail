@@ -1,4 +1,3 @@
-from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from . import get_db
@@ -21,12 +20,22 @@ async def add_user(user_id: int):
             return "Рады видеть старых друзей."
 
 
+async def get_my_connected_mail(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+
+        if connected_mail is not None:
+            return connected_mail  # Возвращаем объект connected_mail, если он существует
+
+    return None
+
+
 async def add_connected_email(mail: str, password: str, user_id: int):
     async for db in get_db():
-        existing_connected_mail = await db.execute(
-            select(ConnectedMail).join(User).filter(ConnectedMail.user_id == User.telegram_id)
-        )
-        existing_connected_mail = existing_connected_mail.first()
+        existing_connected_mail = await get_my_connected_mail(user_id)
 
         if not existing_connected_mail:
             new_connected_mail = ConnectedMail(mail=mail, hashed_password=password, user_id=user_id)
@@ -37,13 +46,4 @@ async def add_connected_email(mail: str, password: str, user_id: int):
             return "У вас уже есть привязанная почта😕"
 
 
-async def get_my_connected_mail(user_id: int):
-    async for db in get_db():
-        connected_mail = await db.execute(
-            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
-        )
-        connected_mail = connected_mail.first()
 
-        if not connected_mail:
-            return False
-        return connected_mail
