@@ -5,7 +5,9 @@ from datetime import datetime
 import re
 from email.header import decode_header
 import html2text
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from bs4 import BeautifulSoup
+from email_validator import validate_email, EmailNotValidError
 
 days_of_week = {
     "Mon": "Понедельник",
@@ -169,3 +171,42 @@ def connect_to_mail_dict(credentials):
             return "LoginFatal"
         else:
             return f"Error connecting to mail: {error_message}"
+
+
+def validate_and_normalize_email(mail: str):
+    try:
+        v = validate_email(mail)
+        normal_mail = v.normalized
+        return normal_mail
+    except EmailNotValidError:
+        return None
+
+
+def format_email_list(emails, start_index=1):
+    formatted_emails = "\n".join([f"{i}) {mail}" for i, mail in enumerate(emails, start=start_index)])
+    return formatted_emails
+
+
+async def send_whitelist_page(page, message, whitelist, start_index=1, max_emails_per_page=10):
+    current_start_index = (page - 1) * max_emails_per_page + start_index
+    end_index = current_start_index + max_emails_per_page - 1
+
+    page_emails = whitelist[current_start_index-1:end_index]
+
+    formatted_emails = format_email_list(page_emails, start_index=current_start_index)
+    total_pages = (len(whitelist) + max_emails_per_page - 1) // max_emails_per_page
+
+    keyboard = []
+
+    if page > 1:
+        keyboard.append([InlineKeyboardButton(text="Предыдущая страница⬅", callback_data=f"whitelist_prev_page"
+                                                                                         f"_{page}")])
+
+    if page < total_pages:
+        keyboard.append([InlineKeyboardButton(text="Следующая страница➡", callback_data=f"whitelist_next_page_{page}")])
+
+    keyboard_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    await message.answer(f"✅Белый список ({page}/{total_pages})✅\n\n{formatted_emails}",
+                           reply_markup=keyboard_markup)
+    await message.delete()
