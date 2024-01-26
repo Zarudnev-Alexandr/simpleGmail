@@ -6,13 +6,14 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, C
 from email_validator import validate_email, EmailNotValidError
 
 from app.db.utils import add_connected_email, get_my_connected_mail, get_user_by_id, add_mail_to_white_list, \
-    get_white_list
-from app.keyboards.mail import mail_go_kb, mail_white_list, mail_white_list_after_enter_kb
+    get_white_list, change_is_launched, get_is_launched_status, delete_connected_email, remove_mail_from_white_list, \
+    get_is_whitelist_active_status, change_is_whitelist_active
+from app.keyboards.mail import mail_go_kb, mail_white_list, mail_white_list_after_enter_kb, my_mail_kb, \
+    mail_white_list_after_remove_kb
 from app.utils.mail import check_format_password, connect_to_mail_dict, validate_and_normalize_email, format_email_list, \
     send_whitelist_page
 
 router = Router()
-users_data = {}
 
 
 @router.message(F.text.lower() == "📬моя почта")
@@ -26,12 +27,28 @@ async def mail_my_mail(message: Message):
     else:
         my_mail = my_mail_result[0]  # Extract the ConnectedMail object from the tuple
         email_address = my_mail.mail
-        await message.answer(text=f"Ваша почта подключена✅\nEmail: {email_address}")
+        await message.answer(text=f"Ваша почта подключена✅\nEmail: {email_address}", reply_markup=my_mail_kb())
         await message.delete()
 
 
-class WhitelistState(StatesGroup):
-    waiting_for_email = State()
+@router.callback_query(F.data.startswith("mymail_remove"))
+async def callback_my_mail(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    my_mail_result = await get_my_connected_mail(user_id=user_id)
+    if not my_mail_result:
+        await callback.message.answer(text="Почта не подключена, отвязывать нечего❌")
+        await callback.message.delete()
+        return
+    if my_mail_result[0].is_launched:
+        await callback.message.answer(text="У вас включена рассылка, в начале отключите ее, выбрав '<i>❌Отменить "
+                                           "рассылку</i>' в клавиатуре снизу ↘")
+        await callback.message.delete()
+        return
+    else:
+        await delete_connected_email(user_id)
+        await callback.message.answer(text="Почта успешно отвязана✅")
+        await callback.message.delete()
+        return
 
 
 @router.message(Command(commands=["cancel"]))
@@ -44,14 +61,21 @@ async def cmd_cancel(message: Message, state: FSMContext):
     )
 
 
+class WhitelistState(StatesGroup):
+    waiting_for_email = State()
+    waiting_for_remove_email = State()
+
+
 @router.message(F.text.lower() == "✅белый список")
 async def white_list(message: Message):
     user_id = message.from_user.id
     current_user = await get_user_by_id(user_id)
+    is_whitelist_active = 'включено' if await get_is_whitelist_active_status(user_id) else 'отключено'
     if current_user:
         await message.answer(text="✅Белый список✅\n\n"
+                                  f"Статус: {is_whitelist_active}\n"
                                   "Здесь можно увидеть добавленные вами почты. Если список пуст, то вам будут "
-                                  "приходить все сообщения, отправленные вам.", reply_markup=mail_white_list())
+                                  "приходить все сообщения.", reply_markup=mail_white_list())
         await message.delete()
 
 
@@ -63,7 +87,6 @@ async def callbacks_whiteList(callback: CallbackQuery, state: FSMContext):
     if action == "addWhiteList":
         await callback.message.answer(text="Укажите почту (формат: xxx@xxx.xxx): ")
         await callback.message.delete()
-        # await add_mail_to_white_list()
         await state.set_state(WhitelistState.waiting_for_email)
 
     elif action == "shwoWhiteList":
@@ -71,6 +94,15 @@ async def callbacks_whiteList(callback: CallbackQuery, state: FSMContext):
 
         current_page = 1
         await send_whitelist_page(current_page, callback.message, whitelist)
+
+    elif action == "removeMail":
+        await callback.message.answer(text="Укажите почту (формат: xxx@xxx.xxx): ")
+        await state.set_state(WhitelistState.waiting_for_remove_email)
+
+    elif action == "changeStatus":
+        change_is_whitelist_active_state = await change_is_whitelist_active(user_id)
+        await callback.message.answer(change_is_whitelist_active_state)
+        await callback.message.delete()
 
 
 @router.callback_query(lambda c: c.data.startswith('whitelist_prev_page_') or c.data.startswith('whitelist_next_page_'))
@@ -109,6 +141,25 @@ async def whitelist_mail_typing(message: Message, state: FSMContext):
         await message.answer("Неправильный формат почты, введите заново: ")
 
 
+@router.message(WhitelistState.waiting_for_remove_email, F.text)
+async def whitelist_mail_remove_typing(message: Message, state: FSMContext):
+    email = message.text
+    user_id = message.from_user.id
+
+    if validate_and_normalize_email(email) is not None:
+        email_remove = await remove_mail_from_white_list(email, user_id)
+        print(email_remove)
+        if email_remove == 404:
+            await message.answer(text="Не удалось удалить почту😢")
+            await state.clear()
+            return
+        elif email_remove == 200:
+            await message.answer(text=f"Почта {email} успешно удалена из белого списка✅",
+                                 reply_markup=mail_white_list_after_remove_kb())
+    else:
+        await message.answer("Неправильный формат почты, введите заново: ")
+
+
 @router.callback_query(F.data.startswith("whiteListAfterEnter_"))
 async def callbacks_whiteList(callback: CallbackQuery, state: FSMContext):
     action = callback.data.split("_")[1]
@@ -118,6 +169,19 @@ async def callbacks_whiteList(callback: CallbackQuery, state: FSMContext):
         await state.set_state(WhitelistState.waiting_for_email)
     elif action == "leave":
         await callback.message.answer("‍🔧Белый список успешно пополнен")
+        await callback.message.delete()
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith("whiteListAfterRemove_"))
+async def callbacks_whiteList_remove(callback: CallbackQuery, state: FSMContext):
+    action = callback.data.split("_")[1]
+    if action == "remove":
+        await callback.message.answer("Давайте еще очистим белый список.\nУкажите почту (формат: xxx@xxx.xxx): ")
+        await callback.message.delete()
+        await state.set_state(WhitelistState.waiting_for_remove_email)
+    elif action == "leave":
+        await callback.message.answer("‍🔧Белый список успешно отредактирован")
         await callback.message.delete()
         await state.clear()
 
@@ -211,6 +275,3 @@ async def callbacks_mail(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("Давайте начнем заново.")
         await state.set_state(RegistrationStates.waiting_for_email)
         await mail_start(callback.message, state)
-
-
-

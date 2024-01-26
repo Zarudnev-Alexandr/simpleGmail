@@ -3,6 +3,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Boolean,
 )
 from .database import Base
 
@@ -19,6 +20,8 @@ class ConnectedMail(Base):
     id = Column(Integer, primary_key=True, index=True)
     mail = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
+    is_launched = Column(Boolean, default=False)
+    is_whitelist_active = Column(Boolean, default=False)
     user_id = Column(Integer, ForeignKey("users.telegram_id"))
 
 

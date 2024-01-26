@@ -1,23 +1,14 @@
-import imaplib
-import email
 import asyncio
 import logging
 import sys
 from aiogram import Bot, Dispatcher, F
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
 from aiogram.types import Message
-from bs4 import BeautifulSoup
-
 from app.db.database import init_models
-from app.db.utils import get_my_connected_mail
+from app.db.utils import get_my_connected_mail, change_is_launched, get_is_launched_status, get_all_connected_mails
 from config_reader import config
 from app.handlers import mail, start
 from aiogram.fsm.storage.memory import MemoryStorage
-from app.handlers.mail import users_data
-import html2text
-from app.utils.mail import convert_date, decode_email_header, decode_email_subject, connect_to_mail_class
-import re
+from app.utils.mail import distribution_mail
 
 username1 = "alexandrzarudnev57@gmail.com"
 app_password1 = "ksqk uuwe tpuf lljx"
@@ -25,7 +16,7 @@ app_password1 = "ksqk uuwe tpuf lljx"
 username2 = "sashazarudnev107@gmail.com"
 app_password2 = "xltk ibjq bnif yrdd"
 
-MAX_MESSAGE_LENGTH = 3500
+# MAX_MESSAGE_LENGTH = 3500
 
 gmail_host = "imap.gmail.com"
 
@@ -38,65 +29,79 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.include_routers(mail.router)
 dp.include_routers(start.router)
 
+active_tasks = {}
+
 
 @dp.message(F.text.lower() == "🚀запустить")
 async def go(message1: Message):
     user_id = message1.from_user.id
-    h = html2text.HTML2Text()
-    last_processed_uid = None
     my_mail_result = await get_my_connected_mail(user_id=user_id)
+    current_status = await get_is_launched_status(user_id)
     if not my_mail_result:
         await message1.answer(text="Почта не подключена❌\nПерейдите в меню снизу и выберите <i>Подключить почту</i>↘")
         return
+    if current_status:
+        await message1.answer(text="Рассылка уже запущена, вы получаете все текущие письма, отправленные вам на почту")
+    else:
+        await change_is_launched(user_id)
+        await message1.answer(text="Рассылка запущена")
+        # Отменяем активную задачу перед запуском новой задачи
+        active_task = active_tasks.get(user_id)
+        if active_task:
+            active_task.cancel()
+            del active_tasks[user_id]
+        new_task = asyncio.create_task(distribution_mail(user_id, bot, {'mail': my_mail_result[0].mail, 'hashed_password':
+            my_mail_result[0].hashed_password}, ))
+        # Сохраняем новую задачу в словаре
+        active_tasks[user_id] = new_task
 
-    while True:
-        mail = connect_to_mail_class(my_mail_result[0])
-        mail.select("INBOX")
-        _, message_numbers = mail.search(None, 'ALL')
-        uids = message_numbers[0].split()
-        if uids:
-            latest_uid = uids[-1]
 
-            # Если это первый запуск или есть новые сообщения
-            if last_processed_uid is None or latest_uid != last_processed_uid:
-                _, data = mail.fetch(latest_uid, '(RFC822)')
-                _, bytes_data = data[0]
-
-                email_message = email.message_from_bytes(bytes_data)
-
-                for part in email_message.walk():
-                    if part.get_content_type() == "text/plain" or part.get_content_type() == "text/html":
-                        message = part.get_payload(decode=True)
-                        html_content = message.decode()
-
-                        soup = BeautifulSoup(html_content, 'html.parser')
-                        clean_text = soup.get_text(separator='\n', strip=True)
-                        clean_text = clean_text.replace('<', '&lt;').replace('>', '&gt;')
-
-                # Move these lines outside the loop
-                text_parts = [clean_text[i:i + MAX_MESSAGE_LENGTH] for i in
-                              range(0, len(clean_text), MAX_MESSAGE_LENGTH)]
-
-                # Отправляем каждую часть текста поочередно
-                for part in text_parts:
-                    send_data = f"<b>📬{h.handle(decode_email_subject(email_message['subject']))}<i>📅{h.handle(convert_date(email_message['date']))}</i>✍{h.handle(decode_email_header(email_message['from']))}</b>{part}"
-                    await message1.answer(send_data, parse_mode=ParseMode.HTML)
-
-                # Обновление переменной last_processed_uid
-                last_processed_uid = latest_uid
-
-        # close the connection
-        mail.close()
-        mail.logout()
-        await asyncio.sleep(5)
+@dp.message(F.text.lower() == "❌отменить рассылку")
+async def cancel_distribution(message: Message):
+    user_id = message.from_user.id
+    current_status = await get_is_launched_status(user_id)
+    if current_status:
+        try:
+            # Отменяем активную задачу перед отменой рассылки
+            active_task = active_tasks.get(user_id)
+            if active_task:
+                await asyncio.shield(active_task.cancel())  # Изолируем задачу от отмены
+                del active_tasks[user_id]
+        except asyncio.CancelledError:
+            pass  # Обработка отмены задачи, чтобы не влиять на остальной код
+        finally:
+            await change_is_launched(user_id)
+            await message.answer(text="Рассылка отменена, чтобы снова получать письма, нажмите на <i>🚀Запустить</i> на "
+                                      "клавиатуре снизу ↘")
+    else:
+        await message.answer(text="Рассылка уже отменена. Чтобы снова получать письма, нажмите на <i>🚀Запустить</i> на "
+                                  "клавиатуре снизу ↘")
 
 
 async def main():
-    await init_models()
-    await dp.start_polling(bot)
+    try:
+        await init_models()
+        users = await get_all_connected_mails()
+
+        tasks = []
+
+        for item in users:
+            if item.is_launched:
+                task = asyncio.create_task(
+                    distribution_mail(item.user_id, bot, {'mail': item.mail, 'hashed_password': item.hashed_password}))
+                tasks.append(task)
+                # Сохраняем задачу в словаре
+                active_tasks[item.user_id] = task
+
+        polling_task = dp.start_polling(bot)
+        tasks.append(polling_task)
+
+        await asyncio.gather(*tasks, return_exceptions=True)  # Используем return_exceptions=True
+
+    except asyncio.CancelledError:
+        print("Some tasks were cancelled, but the bot continues running.")
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     asyncio.run(main())
-

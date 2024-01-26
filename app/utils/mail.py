@@ -5,9 +5,13 @@ from datetime import datetime
 import re
 from email.header import decode_header
 import html2text
+from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from bs4 import BeautifulSoup
 from email_validator import validate_email, EmailNotValidError
+import asyncio
+
+from app.db.utils import get_is_launched_status, get_is_whitelist_active_status, get_white_list
 
 days_of_week = {
     "Mon": "Понедельник",
@@ -187,11 +191,11 @@ def format_email_list(emails, start_index=1):
     return formatted_emails
 
 
-async def send_whitelist_page(page, message, whitelist, start_index=1, max_emails_per_page=10):
+async def send_whitelist_page(page, message, whitelist, start_index=1, max_emails_per_page=15):
     current_start_index = (page - 1) * max_emails_per_page + start_index
     end_index = current_start_index + max_emails_per_page - 1
 
-    page_emails = whitelist[current_start_index-1:end_index]
+    page_emails = whitelist[current_start_index - 1:end_index]
 
     formatted_emails = format_email_list(page_emails, start_index=current_start_index)
     total_pages = (len(whitelist) + max_emails_per_page - 1) // max_emails_per_page
@@ -208,5 +212,77 @@ async def send_whitelist_page(page, message, whitelist, start_index=1, max_email
     keyboard_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     await message.answer(f"✅Белый список ({page}/{total_pages})✅\n\n{formatted_emails}",
-                           reply_markup=keyboard_markup)
+                         reply_markup=keyboard_markup)
     await message.delete()
+
+
+async def process_email_message(email_message, MAX_MESSAGE_LENGTH, bot, user_id, h):
+    for part in email_message.walk():
+        if part.get_content_type() == "text/plain" or part.get_content_type() == "text/html":
+            message = part.get_payload(decode=True)
+            html_content = message.decode()
+
+            soup = BeautifulSoup(html_content, 'html.parser')
+            clean_text = soup.get_text(separator='\n', strip=True)
+            clean_text = clean_text.replace('<', '&lt;').replace('>', '&gt;')
+
+    # Move these lines outside the loop
+    text_parts = [clean_text[i:i + MAX_MESSAGE_LENGTH] for i in
+                  range(0, len(clean_text), MAX_MESSAGE_LENGTH)]
+
+    # Отправляем каждую часть текста поочередно
+    for part in text_parts:
+        send_data = f"<b>📬{h.handle(decode_email_subject(email_message['subject']))}<i>📅{h.handle(convert_date(email_message['date']))}</i>✍{h.handle(decode_email_header(email_message['from']))}</b>{part}"
+        # await message1.answer(send_data, parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, send_data, parse_mode=ParseMode.HTML)
+
+
+# Функция рассылки
+async def distribution_mail(user_id, bot, my_mail_result, ):
+    MAX_MESSAGE_LENGTH = 3500
+    last_processed_uid = None
+    h = html2text.HTML2Text()
+    while True:
+        white_list = []
+        current_status = await get_is_launched_status(user_id)
+        if current_status:
+            is_whitelist_active_status = await get_is_whitelist_active_status(user_id)
+            if is_whitelist_active_status:
+                white_list = await get_white_list(user_id)
+            mail = connect_to_mail_dict(my_mail_result)
+            mail.select("INBOX")
+            _, message_numbers = mail.search(None, 'ALL')
+            uids = message_numbers[0].split()
+            if uids:
+                latest_uid = uids[-1]
+
+                # Если это первый запуск или есть новые сообщения
+                if last_processed_uid is None or latest_uid != last_processed_uid:
+                    _, data = mail.fetch(latest_uid, '(RFC822)')
+                    _, bytes_data = data[0]
+
+                    email_message = email.message_from_bytes(bytes_data)
+
+                    sender = decode_email_header(email_message['From'])
+                    sender_email = ''
+                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                    matches = re.findall(email_pattern, sender)
+                    if matches:
+                        sender_email = matches[0]
+
+                    if is_whitelist_active_status:
+                        # Если белый список включен и отправитель не в списке разрешенных, пропускаем сообщение
+                        if sender_email in white_list:
+
+                            await process_email_message(email_message, MAX_MESSAGE_LENGTH, bot, user_id, h)
+                            last_processed_uid = latest_uid
+                        else:
+                            last_processed_uid = latest_uid
+                    else:
+                        await process_email_message(email_message, MAX_MESSAGE_LENGTH, bot, user_id, h)
+                        last_processed_uid = latest_uid
+
+            # close the connection
+            mail.close()
+            mail.logout()
+            await asyncio.sleep(1)

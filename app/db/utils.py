@@ -43,6 +43,19 @@ async def get_my_connected_mail(user_id: int):
     return None
 
 
+async def get_all_connected_mails():
+    async for db in get_db():
+        connected_mails = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.is_launched == True)
+        )
+        connected_mails = connected_mails.scalars().all()
+
+        if connected_mails is not None:
+            return connected_mails  # Возвращаем объект connected_mail, если он существует
+
+    return None
+
+
 async def add_connected_email(mail: str, password: str, user_id: int):
     async for db in get_db():
         existing_connected_mail = await get_my_connected_mail(user_id)
@@ -54,6 +67,92 @@ async def add_connected_email(mail: str, password: str, user_id: int):
             return "Почта успешно добавлена👏"
         else:
             return "У вас уже есть привязанная почта😕"
+
+
+async def delete_connected_email(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+
+        if connected_mail:
+            await db.delete(connected_mail[0])
+            await db.commit()
+            return "Привязанная почта успешно удалена🖐"
+        else:
+            return "У вас нет привязанной почты для удаления😕"
+
+
+# Меняем статус рассылки на противоположный
+async def change_is_launched(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+        if connected_mail is not None:
+            existing_connected_mail = connected_mail
+
+        if not existing_connected_mail:
+            return "Почта не добавлена"
+        else:
+            connected_mail_instance = existing_connected_mail[0]
+            connected_mail_instance.is_launched = not connected_mail_instance.is_launched
+            await db.commit()
+            return f"Статус is_launched для почты {connected_mail_instance.mail} изменен на {connected_mail_instance.is_launched}"
+
+
+async def change_is_whitelist_active(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+        if connected_mail is not None:
+            existing_connected_mail = connected_mail
+
+        if not existing_connected_mail:
+            return "Почта не добавлена"
+        else:
+            connected_mail_instance = existing_connected_mail[0]
+            connected_mail_instance.is_whitelist_active = not connected_mail_instance.is_whitelist_active
+            await db.commit()
+            return f"Белый список {'включен👌' if connected_mail_instance.is_whitelist_active else 'выключен❌'}"
+
+
+# Получаем текущий статус рассылки
+async def get_is_launched_status(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+        if connected_mail is not None:
+            existing_connected_mail = connected_mail
+
+        if not existing_connected_mail:
+            return "Почта не добавлена"
+        else:
+            connected_mail_instance = existing_connected_mail[0]
+            return connected_mail_instance.is_launched
+
+
+# Получаем текущий статус рассылки
+async def get_is_whitelist_active_status(user_id: int):
+    async for db in get_db():
+        connected_mail = await db.execute(
+            select(ConnectedMail).where(ConnectedMail.user_id == user_id)
+        )
+        connected_mail = connected_mail.first()
+        if connected_mail is not None:
+            existing_connected_mail = connected_mail
+
+        if not existing_connected_mail:
+            return "Почта не добавлена"
+        else:
+            connected_mail_instance = existing_connected_mail[0]
+            return connected_mail_instance.is_whitelist_active
 
 
 async def add_mail_to_white_list(mail: str, user_id: int):
@@ -92,6 +191,35 @@ async def add_mail_to_white_list(mail: str, user_id: int):
         return 201  # Успешно добавлено в whitelist
 
 
+async def remove_mail_from_white_list(mail: str, user_id: int):
+    async for db in get_db():
+        # Получаем запись email из базы данных
+        existing_mail = await db.execute(
+            select(Mail).where(Mail.mail == mail)
+        )
+        existing_mail = existing_mail.first()
+
+        if existing_mail is None:
+            return 404  # Запись не найдена
+
+        # Получаем запись из whitelist
+        whitelist_entry = await db.execute(
+            select(Whitelist).where(
+                and_(Whitelist.user_id == user_id, Whitelist.mail_id == existing_mail[0].id)
+            )
+        )
+        whitelist_entry = whitelist_entry.first()
+
+        if not whitelist_entry:
+            return 404  # Запись не найдена в whitelist
+
+        # Удаляем запись из whitelist
+        await db.delete(whitelist_entry.Whitelist)  # Use the Whitelist instance
+        await db.commit()
+
+        return 200  # Успешно удалено из whitelist
+
+
 async def get_white_list(user_id: int):
     async for db in get_db():
         white_list = await db.execute(
@@ -99,8 +227,3 @@ async def get_white_list(user_id: int):
         )
         white_list = white_list.scalars().all()
         return [mail.mail for mail in white_list]
-
-
-
-
-

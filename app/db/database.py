@@ -33,5 +33,5 @@ async def get_db():
 
 
 async def init_models():
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
