@@ -10,12 +10,6 @@ from app.handlers import mail, start
 from aiogram.fsm.storage.memory import MemoryStorage
 from app.utils.mail import distribution_mail
 
-username1 = "alexandrzarudnev57@gmail.com"
-app_password1 = "ksqk uuwe tpuf lljx"
-
-username2 = "sashazarudnev107@gmail.com"
-app_password2 = "xltk ibjq bnif yrdd"
-
 # MAX_MESSAGE_LENGTH = 3500
 
 gmail_host = "imap.gmail.com"
